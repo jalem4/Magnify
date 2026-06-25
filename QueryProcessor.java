@@ -13,12 +13,13 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.PriorityQueue;
+import java.util.concurrent.ConcurrentHashMap;
 public class QueryProcessor {
-    public static HashMap<String, Integer> GlobalTermCount = DatabaseBuilder.GlobalTermCount;
-    public static HashMap<File, HashMap<String, Integer>> TermFreqPerDoc = DatabaseBuilder.TermFreqPerDoc;
-    public static HashMap<String, Integer> docsContainingTerm = DatabaseBuilder.docsContainingTerm;
-    public static HashMap<File, Integer> docLengths = DatabaseBuilder.docLengths;
-    public static HashMap<String, List<File>> InvertedIndex = DatabaseBuilder.InvertedIndex;
+    //public static ConcurrentHashMap<String, Integer> GlobalTermCount = DatabaseBuilder.GlobalTermCount;
+    public static ConcurrentHashMap<File, HashMap<String, Integer>> TermFreqPerDoc = DatabaseBuilder.TermFreqPerDoc;
+    //public static ConcurrentHashMap<String, Integer> docsContainingTerm = DatabaseBuilder.docsContainingTerm;
+    public static ConcurrentHashMap<File, Integer> docLengths = DatabaseBuilder.docLengths;
+    public static ConcurrentHashMap<String, List<File>> InvertedIndex = DatabaseBuilder.InvertedIndex;
     private static final double K1 = 1.2;
     private static final double B = 0.75;
     public static int getFilesToList(){
@@ -27,7 +28,7 @@ public class QueryProcessor {
     public static void main(String[] args) {
         
     }
-
+    
     public static PriorityQueue<Map.Entry<File, Double>> searchDatabase(String query){
         if (query == null || query.trim().isEmpty()){
             System.out.println("Query empty. Please enter a valid search query");
@@ -37,7 +38,20 @@ public class QueryProcessor {
         PriorityQueue<Map.Entry<File, Double>> topResults = computeTopKBM25Scores(queryTerms);
         return topResults;
     }
-
+    
+    public static double BM25ForTerm(File document, String term, double idf, double avgDocLength){
+        //First get term frequencies for this document
+        HashMap<String, Integer> termFreqs = TermFreqPerDoc.get(document);
+        if(termFreqs == null || !termFreqs.containsKey(term)){
+            return 0.0;
+        }
+        int tf = termFreqs.get(term);
+        int docLength = docLengths.get(document);
+        double numerator = tf * (K1 + 1); //The numerator of the BM25 formaula
+        double denom = tf + K1 * (1 - B + B * ((double) docLength / avgDocLength)); //The denominator of the BM25 formula
+        double score = idf * (numerator / denom);
+        return score;
+    }
     public static PriorityQueue<Map.Entry<File, Double>> computeTopKBM25Scores(String[] queryTerms){
 
         PriorityQueue<Map.Entry<File, Double>> minHeap = new PriorityQueue<>(Comparator.comparingDouble(Map.Entry::getValue));
@@ -81,19 +95,6 @@ public class QueryProcessor {
 
     }
 
-    public static double BM25ForTerm(File document, String term, double idf, double avgDocLength){
-        //First get term frequencies for this document
-        HashMap<String, Integer> termFreqs = TermFreqPerDoc.get(document);
-        if(termFreqs == null || !termFreqs.containsKey(term)){
-            return 0.0;
-        }
-        int tf = termFreqs.get(term);
-        int docLength = docLengths.get(document);
-        double numerator = tf * (K1 + 1); //The numerator of the BM25 formaula
-        double denom = tf + K1 * (1 - B + B * ((double) docLength / avgDocLength)); //The denominator of the BM25 formula
-        double score = idf * (numerator / denom);
-        return score;
-    }
 
     public static double getAverageDocLength(){
         if(docLengths.isEmpty()){

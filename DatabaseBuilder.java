@@ -1,42 +1,41 @@
-//This class should parse through and tokenize
-//all documents in the directory the user gave and build a
-//an inverted index HashMap. Will also save index to a txt/csv
-//file to rebuild later.
+//This class walks through and tokenizes
+//all documents in the given directory and builds the
+//inverted index HashMap as well as all other HashMaps needed for the
+// BM25 ranking. It is also in charge of saving and loading the
+//inverted index to and from a file. 
 import java.io.*;
 import java.nio.file.*;
 import java.util.*;
+import java.util.concurrent.*;
 import java.util.stream.*;
 
 
 public class DatabaseBuilder{
     final static int BUFFER_SIZE = 8192; // 8KB buffer
-    
-    private static final Stemmer STEMMER = new Stemmer();
-
-    private static int totalTokenCount = 0; //Count of tokens in the document
 
     private static final Set<String> STOP_WORDS = new HashSet<>(Arrays.asList(
         "a", "about", "above", "after", "again", "against", "all", "am", "an", "and",
         "any", "are", "aren't", "as", "at", "be", "because", "been", "before", "being",
-        "below", "between", "both", "but", "by", "can't", "cannot", "could", "couldn't",
-        "did", "didn't", "do", "does", "doesn't", "doing", "don't", "down", "during",
-        "each", "few", "for", "from", "further", "had", "hadn't", "has", "hasn't",
-        "have", "haven't", "having", "he", "he'd", "he'll", "he's", "her"));
+        "below", "between", "both", "but", "by", "can", "cannot", "could", "couldn't",
+        "did", "didn", "do", "does", "doesn", "doing", "don", "down", "during",
+        "each", "few", "for", "from", "further", "had", "has", "have", "having",
+        "he", "her"
+    ));
         
     //HashMap to store the frequency of a term in the entire corpus; String is term & Integer is how many times it shows up in the corpus of documents
-    public static HashMap<String, Integer> GlobalTermCount = new HashMap<>(); 
+    public static ConcurrentHashMap<String, Integer> GlobalTermCount = new ConcurrentHashMap<>(); 
     
     //HashMap that stores how many times a term shows up per document; File is the file it shows up in, String is term and Integer is times it shows up in that document
-    public static HashMap<File, HashMap<String, Integer>> TermFreqPerDoc = new HashMap<>(); 
+    public static ConcurrentHashMap<File, HashMap<String, Integer>> TermFreqPerDoc = new ConcurrentHashMap<>(); 
     
     //HashMap for the number of documents that have a term; String is term and Integer is the number of documents in the corpus that contain that word
-    public static HashMap<String, Integer> docsContainingTerm = new HashMap<>(); 
+    public static ConcurrentHashMap<String, Integer> docsContainingTerm = new ConcurrentHashMap<>(); 
     
     //The length of a given file, needed for BM25; File is the document and Integer is how many terms it contains
-    public static HashMap<File, Integer> docLengths = new HashMap<>();  
+    public static ConcurrentHashMap<File, Integer> docLengths = new ConcurrentHashMap<>();  
     
     //The inverted index; String is a term and List contains the documents that contain that word
-    public static HashMap<String, List<File>> InvertedIndex = new HashMap<>(); 
+    public static ConcurrentHashMap<String, List<File>> InvertedIndex = new ConcurrentHashMap<>();
 
 
     public static void buildIndex(String directPath) throws IOException{
@@ -47,27 +46,51 @@ public class DatabaseBuilder{
         docLengths.clear();
         InvertedIndex.clear();
 
-        //Walk through files to grab everything at once, loading it all into memory
-        Path startPath = Paths.get(directPath);
-        if(!Files.exists(Paths.get(directPath))){
+        Path pathToWalk = Paths.get(directPath);
+        if(!Files.exists(pathToWalk)){
             System.out.println("Directory does not exist: " + directPath);
             return;
-            
         }
-        try (Stream<Path> stream = Files.walk(startPath)) {
-        stream.filter(Files::isRegularFile).forEach(filePath -> {
-                try {
-                    System.out.println("Processing: " + filePath.getFileName());
-                    processFile(filePath);
-                } catch (IOException e) {
-                    System.err.println("Error processing file: " + filePath + " - " + e.getMessage());
-                }
+
+        int threadCount = Runtime.getRuntime().availableProcessors();
+        ExecutorService executor = Executors.newFixedThreadPool(threadCount);
+        List<Future<?>> futures = new ArrayList<>();    //List of tasks assigned to threads
+
+        try (Stream<Path> stream = Files.walk(pathToWalk)) {
+            stream.filter(Files::isRegularFile).forEach(filePath -> {
+                futures.add(executor.submit(() -> {
+                    try {
+                        System.out.println("Processing: " + filePath.getFileName());
+                        processFile(filePath);
+                    } catch (IOException e) {
+                        System.err.println("Error processing file: " + filePath + " - " + e.getMessage());
+                    }
+                }));
             });
         } catch (IOException e) {
             System.err.println("Error walking directory: " + directPath);
+            executor.shutdownNow();
             throw e;
+        } finally {
+            executor.shutdown();
+        }
+
+        try {
+            if (!executor.awaitTermination(1, TimeUnit.HOURS)) { //Wait up to an hour for tasks to finish
+                System.out.println("1 hour timeout waiting for tasks to finish has ended. Now forcing shutdown. Some files may not have been processed.");
+                executor.shutdownNow();
+            }
+            for (Future<?> future : futures) { //Loop through all tasks and checks whether it completed successfully or threw an excepiton
+                future.get();
+            }
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new IOException("Index build interrupted", e);
+        } catch (ExecutionException e) {
+            throw new IOException("Error processing file", e.getCause());
         }
     }
+
     private static void processFile(Path filePath) throws IOException {
         File file = filePath.toFile();
         HashMap<String, Integer> termFreq = new HashMap<>();
@@ -80,11 +103,12 @@ public class DatabaseBuilder{
             while((read = br.read(buf)) != -1){
                 for(int i = 0; i < read; i++){
                     char c = buf[i];
-                    if (Character.isWhitespace(c)){
+                    if (!Character.isLetterOrDigit(c)) {//
                         if (str.length() > 1){ //Only process if token is longer than 1 character
                             String token = str.toString();
                             if (!isStopWord(token)){
-                                token = stem(token); //Stem the token before processing
+                                Stemmer STEMMER = new Stemmer();
+                                token = stem(token, STEMMER); //Stem the token before processing
                                 processToken(token, file, termFreq, seenTermsInDoc);
                                 tokenCountInDoc++;
                             }
@@ -107,7 +131,8 @@ public class DatabaseBuilder{
             if (str.length() > 1){
                 String token = str.toString();
                 if (!isStopWord(token)){
-                    token = stem(token); //Stem the token before processing
+                    Stemmer STEMMER = new Stemmer();
+                    token = stem(token, STEMMER); //Stem the token before processing
                     if(token.length() > 1){
                         processToken(token, file, termFreq, seenTermsInDoc);
                         tokenCountInDoc++;
@@ -137,13 +162,16 @@ public class DatabaseBuilder{
         }
     }
 
+    @SuppressWarnings("unchecked")
     public static void loadIndex (String savePath) throws IOException, ClassNotFoundException{
         try (ObjectInputStream ois = new ObjectInputStream(new FileInputStream(savePath))){
-            GlobalTermCount = (HashMap<String,Integer>)ois.readObject();
-            TermFreqPerDoc = (HashMap<File, HashMap<String, Integer>>)ois.readObject();
-            docsContainingTerm = (HashMap<String, Integer>)ois.readObject();
-            docLengths = (HashMap<File, Integer>)ois.readObject();
-            InvertedIndex = (HashMap<String, List<File>>)ois.readObject();
+            GlobalTermCount = new ConcurrentHashMap<>((Map<String, Integer>) ois.readObject());
+            TermFreqPerDoc = new ConcurrentHashMap<>((Map<File, HashMap<String, Integer>>) ois.readObject());
+            docsContainingTerm = new ConcurrentHashMap<>((Map<String, Integer>) ois.readObject());
+            docLengths = new ConcurrentHashMap<>((Map<File, Integer>) ois.readObject());
+            InvertedIndex = new ConcurrentHashMap<>();
+            Map<String, List<File>> loadedIndex = (Map<String, List<File>>) ois.readObject();
+            loadedIndex.forEach((term, files) -> InvertedIndex.put(term, new CopyOnWriteArrayList<>(files)));
         }
     }
 
@@ -151,7 +179,7 @@ public class DatabaseBuilder{
         return STOP_WORDS.contains(token);
     }
 
-    private static String stem(String token){
+    private static String stem(String token, Stemmer STEMMER){
         for(int i = 0; i < token.length(); i++){
             STEMMER.add(token.charAt(i));
         }
@@ -169,7 +197,7 @@ public class DatabaseBuilder{
         //Update the number of documents that contain this token
         if(seenTermsInDoc.add(token)) { // Only increment if this is the first time we've seen this token in this document
             docsContainingTerm.merge(token, 1, Integer::sum);
-            InvertedIndex.computeIfAbsent(token, k -> new ArrayList<>()).add(file);
+            InvertedIndex.computeIfAbsent(token, k -> new CopyOnWriteArrayList<>()).add(file);
         }
 
     }
