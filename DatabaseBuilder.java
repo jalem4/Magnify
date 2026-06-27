@@ -179,7 +179,7 @@ public class DatabaseBuilder{
         return STOP_WORDS.contains(token);
     }
 
-    private static String stem(String token, Stemmer STEMMER){
+    static String stem(String token, Stemmer STEMMER){
         for(int i = 0; i < token.length(); i++){
             STEMMER.add(token.charAt(i));
         }
