@@ -20,10 +20,8 @@ public class ConsoleInterface {
         System.out.println("Welcome to Awesome Retrieval System!");
         while (runProgram) {
             if (searchPath.equals("")) {
-                System.out.println(
-                        "The directroy to search through is not provided. Please provide the path to a folder to use when building inverted index table:");
+                System.out.println("The directroy to search through is not provided. Please provide the path to a folder to use when building inverted index table:");
                 searchPath = scan.nextLine();
-
             } else {
                 mainMenu(scan);
 
@@ -43,14 +41,15 @@ public class ConsoleInterface {
             case 4 -> saveDatabase(pathToSaveDatabase, scan);
             case 5 -> loadDatabase(pathToSaveDatabase);
             case 0 -> {
-                System.out.println("Goodbye");
-                scan.close();
+                try (scan) {
+                    System.out.println("Goodbye");
+                }
                 runProgram = false;
             }
+
             default -> System.out.println("Not an option\n");
         }
         Thread.sleep(1000);
-
     }
 
     public static void printOptions() {
@@ -77,16 +76,12 @@ public class ConsoleInterface {
                     searchPath = scan.nextLine();
                 }
                 case 2 -> {
-                    System.out.printf(
-                            "Enter the number of documents to use (Default is 5, current set number is: %s):\n",
-                            filesToList);
+                    System.out.printf("Enter the number of documents to use (Default is 5, current set number is: %s):\n", filesToList);
                     filesToList = scan.nextInt();
                     scan.nextLine();
                 }
                 case 3 -> {
-                    System.out.printf(
-                            "Enter path to file to save database to and load database from. Must be a .idx file. (Current file is: %s)",
-                            pathToSaveDatabase);
+                    System.out.printf("Enter path to file to save database to and load database from. Must be a .idx file. (Current file is: %s)", pathToSaveDatabase);
                     pathToSaveDatabase = scan.nextLine();
                 }
                 case 0 -> {
@@ -113,19 +108,18 @@ public class ConsoleInterface {
         }
         Collections.reverse(results);
 
-        boolean runProgram = true;
-        while (runProgram) {
+        boolean showResults = true;
+        while (showResults) {
             System.out.printf("======= Top %d Results =======%n", results.size());
             for (int i = 0; i < results.size(); i++) {
                 Map.Entry<File, Double> result = results.get(i);
                 System.out.printf("%d. %s (Score: %.4f)%n", i + 1, result.getKey().getName(), result.getValue());
-
             }
             System.out.println("Which file would you like to open? 0 to exit to main menu");
             int option = scan.nextInt();
             scan.nextLine();
             if (option == 0) {
-                runProgram = false;
+                showResults = false;
             } else if (option >= 1 && option <= results.size()) {
                 File selectedFile = results.get(option - 1).getKey();
                 openFile(selectedFile);
@@ -150,7 +144,6 @@ public class ConsoleInterface {
         try {
             desktop.open(file);
             System.out.println("Opening: " + file.getName());
-
         } catch (IOException e) {
             System.out.println("Couldn't open file: " + file.getName());
             System.out.println("Error: " + e.getMessage());
@@ -162,7 +155,6 @@ public class ConsoleInterface {
             DatabaseBuilder.buildIndex(pathToDirectory);
         } catch (IOException e) {
             System.out.println("Error, could not open directory: " + pathToDirectory);
-            e.printStackTrace();
         }
     }
 
@@ -186,7 +178,6 @@ public class ConsoleInterface {
             System.out.println("Database saved to: " + pathToSaveDatabase);
         } catch (IOException e) {
             System.out.println("Error, could not save database");
-            e.printStackTrace();
         }
     }
 
@@ -198,9 +189,8 @@ public class ConsoleInterface {
         try {
             DatabaseBuilder.loadIndex(pathToSaveDatabase);
             System.out.println("Loaded database from: " + pathToSaveDatabase);
-        } catch (Exception e) {
+        } catch (IOException | ClassNotFoundException e) {
             System.out.println("Error, could not load database: " + pathToSaveDatabase);
-            e.printStackTrace();
         }
     }
 

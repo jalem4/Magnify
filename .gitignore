@@ -1,1 +1,5 @@
-VEP2_TCP_SimpleText-main/*
+VEP2_TCP_SimpleText-main/
+Test Directory/
+*.class
+*.idx
+VEP2_TCP_SimpleText.zip
